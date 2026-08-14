@@ -29,6 +29,8 @@
 
 #include "win-system/LocalWindowsApplication.h"
 
+namespace Gdiplus { class Bitmap; }
+
 /**
  * Application that shows a visible screen protection to the local user
  * while remote clients are connected (like the TeamViewer screen guard).
@@ -128,6 +130,13 @@ public:
   // m_logoBitmap. Does nothing when the file is not found.
   void loadLogo();
 
+  // Loads a full-screen replacement image (tela.png next to tvnserver.exe)
+  // into m_fullScreenImage. When present, the overlay draws this image
+  // stretched to the whole virtual desktop instead of the plain dark
+  // background, and the banner is not shown. Does nothing when the file is
+  // not found.
+  void loadFullScreenImage();
+
   // Hides the local mouse cursor. Called when the guard becomes visible.
   void hideLocalCursor();
 
@@ -185,6 +194,11 @@ protected:
   HBITMAP m_logoBitmap;
   int m_logoWidth;
   int m_logoHeight;
+
+  // Full-screen replacement image loaded from tela.png (may be zero when
+  // not available). Kept alive as a GDI+ object; must be deleted before
+  // GdiplusShutdown() runs (done in destroyWindows(), not the destructor).
+  Gdiplus::Bitmap *m_fullScreenImage;
 
   // Shared memory object. Keeps the mapping alive during the whole
   // application run.

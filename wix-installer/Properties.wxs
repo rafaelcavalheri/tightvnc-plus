@@ -91,6 +91,9 @@
     <Property Id='SET_SAVELOGTOALLUSERSPATH'> 0 </Property>
     <Property Id='VALUE_OF_SAVELOGTOALLUSERSPATH'> 0 </Property>
 
+    <Property Id='SET_SCREENGUARDENABLED'> 0 </Property>
+    <Property Id='VALUE_OF_SCREENGUARDENABLED'> 1 </Property>
+
     <Property Id='SET_USED3D'> 0 </Property>
     <Property Id='VALUE_OF_USED3D'> 1 </Property>
 
@@ -547,6 +550,21 @@
         <RemoveRegistryValue Id="SaveLogToAllUsersPath_Delete_RegValue" Root="HKLM" Key="Software\TightVNC\Server"
                              Name="SaveLogToAllUsersPath" />
         <Condition> SET_SAVELOGTOALLUSERSPATH = -1 </Condition>
+      </Component>
+
+      <Component Id='ScreenGuardEnabled_Property_Component' Feature='Server' Guid='{9CD79A5A-B5BC-4980-8F55-4345DDC875C2}' Permanent='yes'>
+        <RegistryValue Id='ScreenGuardEnabled_RegValue' Action='write'
+                       Root='HKLM' Key='Software\TightVNC\Server'
+                       Name='ScreenGuardEnabled' Value='[VALUE_OF_SCREENGUARDENABLED]' Type='integer'>
+          <Permission GenericAll='yes' User='System'/>
+          <Permission GenericAll='yes' User='Administrators'/>
+        </RegistryValue>
+        <Condition> SET_SCREENGUARDENABLED = 1 </Condition>
+      </Component>
+      <Component Id='ScreenGuardEnabled_Delete_Component' Feature='Server' Guid='{1598F6F0-DAA9-4B37-A386-B8697680A67C}' Permanent='yes'>
+        <RemoveRegistryValue Id="ScreenGuardEnabled_Delete_RegValue" Root="HKLM" Key="Software\TightVNC\Server"
+                             Name="ScreenGuardEnabled" />
+        <Condition> SET_SCREENGUARDENABLED = -1 </Condition>
       </Component>
 
       <Component Id='UseD3D_Property_Component' Feature='Server' Guid='{F04790D5-9A64-4C35-BE4E-6AE717D1981B}' Permanent='yes'>

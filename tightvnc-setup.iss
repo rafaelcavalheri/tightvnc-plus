@@ -64,6 +64,8 @@ Source: "{#SrcRoot}\wix-installer\files64\sas.dll"; DestDir: "{app}"; Flags: ign
 Source: "{#SrcRoot}\wix-installer\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; Logo exibido no banner do screen guard.
 Source: "{#SrcRoot}\logo.png"; DestDir: "{app}"; Flags: ignoreversion
+; Imagem de tela cheia (substitui o banner quando presente).
+Source: "{#SrcRoot}\tela.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\TightVNC Server - Control Interface"; Filename: "{app}\tvnserver.exe"; Parameters: "-controlservice"

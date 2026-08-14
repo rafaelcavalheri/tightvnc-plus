@@ -92,6 +92,7 @@ ScreenGuardApplication::ScreenGuardApplication(HINSTANCE hInstance,
   m_logoBitmap(0),
   m_logoWidth(0),
   m_logoHeight(0),
+  m_fullScreenImage(0),
   m_sharedMemory(0),
   m_sharedData(0),
   m_lastGeneration(0),
@@ -169,8 +170,10 @@ int ScreenGuardApplication::run()
   // Load the banner icon from the module resources.
   m_bannerIcon = LoadIcon(m_appInstance, MAKEINTRESOURCE(IDI_CONNECTED));
 
-  // Load the logo image from the executable folder.
+  // Load the logo and optional full-screen replacement image from the
+  // executable folder.
   loadLogo();
+  loadFullScreenImage();
 
   try {
     registerWindowClasses();
@@ -357,6 +360,11 @@ void ScreenGuardApplication::destroyWindows()
     m_blankWindow = 0;
   }
 
+  if (m_fullScreenImage != 0) {
+    delete m_fullScreenImage;
+    m_fullScreenImage = 0;
+  }
+
   restoreLocalCursor();
 }
 
@@ -418,6 +426,36 @@ void ScreenGuardApplication::loadLogo()
   delete bitmap;
 
   m_logoBitmap = hbmp;
+}
+
+void ScreenGuardApplication::loadFullScreenImage()
+{
+  // Look for tela.png in the same folder as tvnserver.exe.
+  StringStorage moduleFolder;
+  if (!Environment::getCurrentModuleFolderPath(&moduleFolder)) {
+    return;
+  }
+  StringStorage imagePath;
+  imagePath.format(_T("%s\\tela.png"), moduleFolder.getString());
+
+  Bitmap *bitmap = 0;
+  try {
+    bitmap = Bitmap::FromFile(imagePath.getString());
+  } catch (...) {
+    bitmap = 0;
+  }
+  if (bitmap == 0 || bitmap->GetLastStatus() != Ok) {
+    if (bitmap != 0) {
+      delete bitmap;
+    }
+    return;
+  }
+
+  // Kept alive (not converted to a HBITMAP): the overlay window draws it
+  // directly with GDI+ on every repaint, stretched to the current window
+  // size. Must be deleted before GdiplusShutdown() runs -- see
+  // destroyWindows().
+  m_fullScreenImage = bitmap;
 }
 
 // Standard OCR_* system cursor identifiers (winuser.h only declares them
@@ -550,10 +588,13 @@ void ScreenGuardApplication::applySharedState()
   // Overlay and banner are visible while at least one client is connected
   // (or always in the test mode).
   bool showGuard = m_testMode || clientCount > 0;
+  // When a full-screen replacement image (tela.png) is loaded, it already
+  // covers the whole screen, so the banner is not needed.
+  bool showBanner = showGuard && m_fullScreenImage == 0;
   ShowWindow(m_overlayWindow,
              showGuard ? SW_SHOWNOACTIVATE : SW_HIDE);
   ShowWindow(m_bannerWindow,
-             showGuard ? SW_SHOWNOACTIVATE : SW_HIDE);
+             showBanner ? SW_SHOWNOACTIVATE : SW_HIDE);
 
   // Hide the local mouse cursor while the guard is visible so the local
   // user cannot see the remote-controlled cursor movement. Restore it when
@@ -719,7 +760,14 @@ LRESULT CALLBACK ScreenGuardApplication::overlayWndProc(HWND hWnd, UINT msg,
     HDC hdc = BeginPaint(hWnd, &ps);
     RECT rc;
     GetClientRect(hWnd, &rc);
+    // Black base layer first: covers any transparent areas of the
+    // full-screen image (or the whole window when there is no image).
     FillRect(hdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    if (_this != 0 && _this->m_fullScreenImage != 0) {
+      Graphics graphics(hdc);
+      graphics.DrawImage(_this->m_fullScreenImage, 0, 0,
+                         rc.right - rc.left, rc.bottom - rc.top);
+    }
     EndPaint(hWnd, &ps);
     return 0;
   }
