@@ -85,6 +85,7 @@ private:
   void onPollingIntervalUpdate();
   void onFileTransferCheckBoxClick();
   void onRemoveWallpaperCheckBoxClick();
+  void onScreenGuardCheckBoxClick();
   void onGrabTransparentWindowsChanged();
   void onUseD3DChanged();
 
@@ -109,6 +110,7 @@ protected:
   CheckBox m_useMirrorDriver;
   CheckBox m_enableFileTransfers;
   CheckBox m_removeWallpaper;
+  CheckBox m_screenGuard;
   CheckBox m_acceptRfbConnections;
   CheckBox m_acceptHttpConnections;
   CheckBox m_showTrayIcon;

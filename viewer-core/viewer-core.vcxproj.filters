@@ -129,9 +129,6 @@
     <ClCompile Include="UpdateRequestSender.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ExtendedDesktopSizeDecoder.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AuthHandler.h">
@@ -247,9 +244,6 @@
     </ClInclude>
     <ClInclude Include="UpdateRequestSender.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ExtendedDesktopSizeDecoder.h">
-      <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -587,6 +587,9 @@ bool Configurator::saveServerConfig(SettingsManager *sm)
   if (!sm->setBoolean(_T("RemoveWallpaper"), m_serverConfig.isRemovingDesktopWallpaperEnabled())) {
     saveResult = false;
   }
+  if (!sm->setBoolean(_T("ScreenGuardEnabled"), m_serverConfig.isScreenGuardEnabled())) {
+    saveResult = false;
+  }
   if (!sm->setBoolean(_T("UseD3D"), m_serverConfig.getD3DIsAllowed())) {
     saveResult = false;
   }
@@ -746,6 +749,14 @@ bool Configurator::loadServerConfig(SettingsManager *sm, ServerConfig *config)
   } else {
     m_isConfigLoadedPartly = true;
     m_serverConfig.enableRemovingDesktopWallpaper(boolVal);
+  }
+  if (!sm->getBoolean(_T("ScreenGuardEnabled"), &boolVal)) {
+    // Option not found in the registry: keep the default value (enabled).
+    // This is not treated as a load failure because older versions did
+    // not have this option.
+  } else {
+    m_isConfigLoadedPartly = true;
+    m_serverConfig.enableScreenGuard(boolVal);
   }
   if (!sm->getBoolean(_T("UseD3D"), &boolVal)) {
     loadResult = false;

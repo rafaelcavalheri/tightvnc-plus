@@ -117,6 +117,15 @@ Desktop *RfbClientManager::onClientAuth(RfbClient *client)
       (*iter)->afterFirstClientConnect();
     }
   }
+
+  // Notify the listeners about the changed client count. This is needed by
+  // the screen guard to publish the current state even when a second (or
+  // any subsequent) client connects while the desktop already exists.
+  for (vector<RfbClientManagerEventListener *>::iterator iter =
+         m_listeners.begin(); iter != m_listeners.end(); iter++) {
+    (*iter)->afterClientCountChanged();
+  }
+
   return m_desktop;
 }
 
@@ -302,6 +311,14 @@ void RfbClientManager::validateClientList()
     }
   }
 
+  // Notify listeners that the client count has changed. This covers the
+  // case when one of several clients disconnects (the desktop object stays
+  // alive).
+  for (vector<RfbClientManagerEventListener *>::iterator iter =
+         m_listeners.begin(); iter != m_listeners.end(); iter++) {
+    (*iter)->afterClientCountChanged();
+  }
+
   AutoLock al(&m_clientListLocker);
   if (m_clientList.empty() && m_nonAuthClientList.empty()) {
     m_listUnderflowingEvent.notify();
@@ -418,6 +435,20 @@ void RfbClientManager::getClientsInfo(RfbClientInfoList *list)
 
       list->push_back(RfbClientInfo(each->getId(), peerHost.getString()));
     }
+  }
+}
+
+void RfbClientManager::getAllClientsInfo(RfbClientInfoList *list)
+{
+  AutoLock al(&m_clientListLocker);
+
+  for (ClientListIter it = m_clientList.begin(); it != m_clientList.end(); it++) {
+    RfbClient *each = *it;
+    StringStorage peerHost;
+
+    each->getPeerHost(&peerHost);
+
+    list->push_back(RfbClientInfo(each->getId(), peerHost.getString()));
   }
 }
 

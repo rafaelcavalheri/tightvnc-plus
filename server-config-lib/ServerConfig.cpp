@@ -37,8 +37,7 @@ ServerConfig::ServerConfig()
   m_enableAppletParamInUrl(true), m_enableFileTransfers(true),
   m_D3DAllowed(true),
   m_mirrorDriverAllowed(true),
-  m_removeWallpaper(true), m_hasReadOnlyPassword(false),
-  m_hasPrimaryPassword(true), m_alwaysShared(false), m_neverShared(false),
+  m_removeWallpaper(true), m_screenGuardEnabled(true), m_hasReadOnlyPassword(false),  m_hasPrimaryPassword(true), m_alwaysShared(false), m_neverShared(false),
   m_disconnectClients(true), m_pollingInterval(1000), m_localInputPriorityTimeout(3),
   m_blockLocalInput(false), m_blockRemoteInput(false), m_localInputPriority(false),
   m_defaultActionAccept(false), m_queryTimeout(30),
@@ -124,6 +123,7 @@ void ServerConfig::serialize(DataOutputStream *output)
   output->writeInt8(m_hasReadOnlyPassword ? 1 : 0);
   output->writeInt8(m_hasControlPassword ? 1 : 0);
   output->writeInt8(m_showTrayIcon ? 1 : 0);
+  output->writeInt8(m_screenGuardEnabled ? 1 : 0);
 
   output->writeUTF8(m_logFilePath.getString());
 }
@@ -195,6 +195,7 @@ void ServerConfig::deserialize(DataInputStream *input)
   m_hasReadOnlyPassword = input->readInt8() == 1;
   m_hasControlPassword = input->readInt8() == 1;
   m_showTrayIcon = input->readInt8() == 1;
+  m_screenGuardEnabled = input->readInt8() == 1;
 
   input->readUTF8(&m_logFilePath);
 }
@@ -345,6 +346,18 @@ bool ServerConfig::isRemovingDesktopWallpaperEnabled()
 {
   AutoLock lock(&m_objectCS);
   return m_removeWallpaper;
+}
+
+void ServerConfig::enableScreenGuard(bool enabled)
+{
+  AutoLock lock(&m_objectCS);
+  m_screenGuardEnabled = enabled;
+}
+
+bool ServerConfig::isScreenGuardEnabled()
+{
+  AutoLock lock(&m_objectCS);
+  return m_screenGuardEnabled;
 }
 
 void ServerConfig::setDisconnectAction(DisconnectAction action)

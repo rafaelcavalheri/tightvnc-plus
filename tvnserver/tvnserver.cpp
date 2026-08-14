@@ -32,6 +32,7 @@
 #include "tvnserver-app/QueryConnectionApplication.h"
 #include "tvnserver-app/DesktopServerApplication.h"
 #include "tvnserver-app/AdditionalActionApplication.h"
+#include "tvnserver-app/ScreenGuardApplication.h"
 #include "tvnserver-app/ServiceControlApplication.h"
 #include "tvnserver-app/ServiceControlCommandLine.h"
 #include "tvnserver-app/QueryConnectionCommandLine.h"
@@ -72,6 +73,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     { DesktopServerCommandLine::DESKTOP_SERVER_KEY, NO_ARG },
     { QueryConnectionCommandLine::QUERY_CONNECTION, NO_ARG },
+
+    { ScreenGuardApplication::SCREEN_GUARD_KEY, NO_ARG },
 
     { AdditionalActionApplication::LOCK_WORKSTATION_KEY, NO_ARG },
     { AdditionalActionApplication::LOGOUT_KEY, NO_ARG },
@@ -127,6 +130,16 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         StringTable::getString(IDS_MBC_TVNCONTROL),
         MB_OK | MB_ICONERROR);
       return 1;
+    }
+  } else if (firstKey.isEqualTo(ScreenGuardApplication::SCREEN_GUARD_KEY)) {
+    crashHook.setGuiEnabled();
+    try {
+      ScreenGuardApplication screenGuardApp(hInstance,
+        WindowNames::WINDOW_CLASS_NAME,
+        lpCmdLine);
+      return screenGuardApp.run();
+    } catch (SystemException &ex) {
+      return ex.getErrorCode();
     }
   } else if (firstKey.isEqualTo(AdditionalActionApplication::LOCK_WORKSTATION_KEY) ||
     firstKey.isEqualTo(AdditionalActionApplication::LOGOUT_KEY)) {

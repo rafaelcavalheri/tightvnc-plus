@@ -23,6 +23,7 @@
 //
 
 #include "tvnserver/resource.h"
+#include "tvnserver/resource_screenguard.h"
 #include "ServerConfigDialog.h"
 #include "ConfigDialog.h"
 #include "ChangePasswordDialog.h"
@@ -49,6 +50,58 @@ void ServerConfigDialog::setParentDialog(BaseDialog *dialog)
 BOOL ServerConfigDialog::onInitDialog()
 {
   m_config = Configurator::getInstance()->getServerConfig();
+
+  // Create the screen guard check box at runtime. The dialog template
+  // (tvnserver.rc) is stored as UTF-16 and editing it outside Visual
+  // Studio is error-prone, so the control is created here and positioned
+  // below the "Hide desktop wallpaper" check box.
+  HWND parent = m_ctrlThis.getWindow();
+  RECT wallpaperRc;
+  HWND wallpaperHwnd = GetDlgItem(parent, IDC_REMOVE_WALLPAPER);
+  if (wallpaperHwnd != 0) {
+    GetWindowRect(wallpaperHwnd, &wallpaperRc);
+    MapWindowPoints(0, parent, (LPPOINT)&wallpaperRc, 2);
+  } else {
+    // Fallback position in dialog units converted to pixels.
+    wallpaperRc.left = 16;
+    wallpaperRc.top = 153;
+  }
+
+  HWND screenGuardHwnd = CreateWindowEx(0, _T("BUTTON"),
+    _T("Show screen guard warning to the local user"),
+    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+    wallpaperRc.left, wallpaperRc.top + 15,
+    200, 14,
+    parent, (HMENU)IDC_SCREEN_GUARD,
+    m_ctrlThis.getWindow() != 0 ? (HINSTANCE)GetWindowLongPtr(parent, GWLP_HINSTANCE) : 0,
+    0);
+  if (screenGuardHwnd != 0) {
+    // Match the dialog font.
+    HFONT dlgFont = (HFONT)SendMessage(parent, WM_GETFONT, 0, 0);
+    if (dlgFont != 0) {
+      SendMessage(screenGuardHwnd, WM_SETFONT, (WPARAM)dlgFont, TRUE);
+    }
+  }
+
+  // Move the controls below the new check box down by 15 pixels so they
+  // do not overlap: "Show icon in the notification area" and
+  // "Connect to RDP session".
+  int moveDownIds[] = {
+    IDC_SHOW_TVNCONTROL_ICON_CHECKBOX,
+    IDC_CONNECT_RDP_SESSION
+  };
+  for (size_t i = 0;
+       i < sizeof(moveDownIds) / sizeof(moveDownIds[0]); i++) {
+    HWND ctrlHwnd = GetDlgItem(parent, moveDownIds[i]);
+    if (ctrlHwnd != 0) {
+      RECT ctrlRc;
+      GetWindowRect(ctrlHwnd, &ctrlRc);
+      MapWindowPoints(0, parent, (LPPOINT)&ctrlRc, 2);
+      SetWindowPos(ctrlHwnd, 0, ctrlRc.left, ctrlRc.top + 15,
+                   0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    }
+  }
+
   initControls();
   updateUI();
 
@@ -96,6 +149,9 @@ BOOL ServerConfigDialog::onCommand(UINT controlID, UINT notificationID)
       break;
     case IDC_REMOVE_WALLPAPER:
       onRemoveWallpaperCheckBoxClick();
+      break;
+    case IDC_SCREEN_GUARD:
+      onScreenGuardCheckBoxClick();
       break;
     case IDC_BLOCK_LOCAL_INPUT:
       onBlockLocalInputChanged();
@@ -212,6 +268,7 @@ void ServerConfigDialog::updateUI()
 
   m_enableFileTransfers.check(m_config->isFileTransfersEnabled());
   m_removeWallpaper.check(m_config->isRemovingDesktopWallpaperEnabled());
+  m_screenGuard.check(m_config->isScreenGuardEnabled());
 
   m_acceptRfbConnections.check(m_config->isAcceptingRfbConnections());
   m_acceptHttpConnections.check(m_config->isAcceptingHttpConnections());
@@ -272,6 +329,7 @@ void ServerConfigDialog::apply()
 
   m_config->enableFileTransfers(m_enableFileTransfers.isChecked());
   m_config->enableRemovingDesktopWallpaper(m_removeWallpaper.isChecked());
+  m_config->enableScreenGuard(m_screenGuard.isChecked());
 
   m_config->acceptRfbConnections(m_acceptRfbConnections.isChecked());
   m_config->acceptHttpConnections(m_acceptHttpConnections.isChecked());
@@ -319,15 +377,14 @@ void ServerConfigDialog::apply()
 void ServerConfigDialog::initControls()
 {
   HWND hwnd = m_ctrlThis.getWindow();
-  m_rfbPort.setWindow(GetDlgItem(hwnd, IDC_RFB_PORT));
-  m_httpPort.setWindow(GetDlgItem(hwnd, IDC_HTTP_PORT));
+  m_rfbPort.setWindow(GetDlgItem(hwnd, IDC_RFB_PORT));  m_httpPort.setWindow(GetDlgItem(hwnd, IDC_HTTP_PORT));
   m_pollingInterval.setWindow(GetDlgItem(hwnd, IDC_POLLING_INTERVAL));
   m_useD3D.setWindow(GetDlgItem(hwnd, IDC_USE_D3D));
   m_useMirrorDriver.setWindow(GetDlgItem(hwnd, IDC_USE_MIRROR_DRIVER));
   m_enableFileTransfers.setWindow(GetDlgItem(hwnd, IDC_ENABLE_FILE_TRANSFERS));
   m_removeWallpaper.setWindow(GetDlgItem(hwnd, IDC_REMOVE_WALLPAPER));
-  m_acceptRfbConnections.setWindow(GetDlgItem(hwnd, IDC_ACCEPT_RFB_CONNECTIONS));
-  m_acceptHttpConnections.setWindow(GetDlgItem(hwnd, IDC_ACCEPT_HTTP_CONNECTIONS));
+  m_screenGuard.setWindow(GetDlgItem(hwnd, IDC_SCREEN_GUARD));
+  m_acceptRfbConnections.setWindow(GetDlgItem(hwnd, IDC_ACCEPT_RFB_CONNECTIONS));  m_acceptHttpConnections.setWindow(GetDlgItem(hwnd, IDC_ACCEPT_HTTP_CONNECTIONS));
   m_primaryPassword.setWindow(GetDlgItem(hwnd, IDC_PRIMARY_PASSWORD));
   m_readOnlyPassword.setWindow(GetDlgItem(hwnd, IDC_VIEW_ONLY_PASSWORD));
   m_useAuthentication.setWindow(GetDlgItem(hwnd, IDC_USE_AUTHENTICATION));
@@ -508,6 +565,11 @@ void ServerConfigDialog::onFileTransferCheckBoxClick()
 }
 
 void ServerConfigDialog::onRemoveWallpaperCheckBoxClick()
+{
+  ((ConfigDialog *)m_parentDialog)->updateApplyButtonState();
+}
+
+void ServerConfigDialog::onScreenGuardCheckBoxClick()
 {
   ((ConfigDialog *)m_parentDialog)->updateApplyButtonState();
 }

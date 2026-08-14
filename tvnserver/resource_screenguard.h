@@ -1,4 +1,4 @@
-// Copyright (C) 2009,2010,2011,2012 GlavSoft LLC.
+// Copyright (C) 2025
 // All rights reserved.
 //
 //-------------------------------------------------------------------------
@@ -22,34 +22,19 @@
 //-------------------------------------------------------------------------
 //
 
-#ifndef _RFB_CLIENT_MANAGER_LISTENER_H_
-#define _RFB_CLIENT_MANAGER_LISTENER_H_
+// Resource identifiers for the screen guard feature.
+//
+// The screen guard check box is created at runtime by ServerConfigDialog,
+// so this header defines only the identifiers, not the dialog resources.
+// This avoids editing the UTF-16 resource files (tvnserver.rc and
+// resource.h) which is error-prone outside Visual Studio.
 
-/**
- * Listener of RfbClientManager object events.
- */
-class RfbClientManagerEventListener
-{
-public:
-  /**
-   * Destructor, does nothing.
-   */
-  virtual ~RfbClientManagerEventListener();
+#ifndef __RESOURCE_SCREEN_GUARD_H__
+#define __RESOURCE_SCREEN_GUARD_H__
 
-  /**
-   * Called when first rfb client connects to server.
-   */
-  virtual void afterFirstClientConnect() = 0;
-  /**
-   * Called when last rfb client disconnects from server.
-   */
-  virtual void afterLastClientDisconnect() = 0;
+// Check box "Show screen guard to the local user" on the Server page.
+// The value 1098 is free: the highest control id used in resource.h is
+// 1097 (IDC_CONNECT_RDP_SESSION).
+#define IDC_SCREEN_GUARD 1098
 
-  /**
-   * Called when the number of connected clients changes (a client has
-   * connected or disconnected). The default implementation does nothing.
-   */
-  virtual void afterClientCountChanged() {};
-};
-
-#endif
+#endif // __RESOURCE_SCREEN_GUARD_H__

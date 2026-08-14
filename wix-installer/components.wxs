@@ -18,11 +18,13 @@
         <File Id='tvnserverEXE' Name='tvnserver.exe' DiskId='1' Source='$(var.BinFolder)\tvnserver.exe' KeyPath='yes'>
         </File>
         <!-- screenhooks -->
-        <File Id='screenHooksFile' Name='screenhooks32.dll' DiskId='1' Source='$(var.SrcFolder)\Release\screenhooks32.dll'/>
+        <File Id='screenHooksFile' Name='screenhooks32.dll' DiskId='1' Source='$(var.SrcFolder)\Release\x86\screenhooks32.dll'/>
         <?if $(var.Platform) = x64 ?>
           <File Id='screenHooksFile64' Name='screenhooks64.dll' DiskId='1' Source='$(var.BinFolder)\screenhooks64.dll'/>
-          <File Id='screenHooksLoader' Name='hookldr.exe' DiskId='1' Source='$(var.SrcFolder)\Release\hookldr.exe'/>
+          <File Id='screenHooksLoader' Name='hookldr.exe' DiskId='1' Source='$(var.BinFolder)\hookldr.exe'/>
         <?endif ?>
+        <!-- Logo shown in the screen guard banner. -->
+        <File Id='screenGuardLogoFile' Name='logo.png' DiskId='1' Source='$(var.SrcFolder)\logo.png'/>
       </Component>
       <!--
       <Component Id='ServiceUnregister' Guid='{7EA20DAD-06A8-402f-A67D-0B0AB2E5356B}' Feature='Server'>
@@ -50,7 +52,7 @@
       <?endif?>
 
       <Component Id='LicenseFileComponent' Guid='{66D70E32-FE2B-49ca-A64C-3CCDC7A7BF95}'>
-        <File Id='LicenseFile' Name='LICENSE.txt' Source='$(var.SrcFolder)\LICENSE.txt'
+        <File Id='LicenseFile' Name='LICENSE.txt' Source='$(var.SrcFolder)\wix-installer\LICENSE.txt'
               KeyPath='yes'>
         </File>
       </Component>

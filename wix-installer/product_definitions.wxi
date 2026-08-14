@@ -8,13 +8,16 @@
        then the installer will
        install the TightVNC product parallelly with the same version and
        the same name -->
-  <?ifndef SERVER_FREE ?>
-    <?define Version='!(bind.FileVersion.tvnserverEXE)' ?>
-  <?else?>
-    <?ifndef VIEWER_FREE ?>
-      <?define Version='!(bind.FileVersion.viewerEXE)' ?>
-    <?endif?>
+  <!-- BuildRevision is passed from build-and-package.bat (via make-msi.bat's
+       arbitrary -d define argument) so every generated MSI gets a strictly
+       increasing version. Without this, reinstalling an MSI with the exact
+       same ProductVersion as one already on the machine is blocked by the
+       AlreadyUpdated custom action (see custom_actions.wxs), and silently
+       does nothing: the old binaries stay in place. -->
+  <?ifndef BuildRevision ?>
+    <?define BuildRevision = '81' ?>
   <?endif?>
+  <?define Version = "2.8.$(var.BuildRevision)" ?>
   <?define Manufacturer='GlavSoft LLC.' ?>
 
   <?define SrcFolder = "..\" ?>
@@ -29,13 +32,13 @@
     <?define ProductId = '*' ?>
     <?define Win64 = "yes" ?>
     <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
-    <?define BinFolder = "$(var.SrcFolder)\x64\Release" ?>
+    <?define BinFolder = "$(var.SrcFolder)\Release\x64" ?>
     <?define AddonBinFolder = "files64" ?>
   <?else ?>
     <?define ProductId = '*' ?>
     <?define Win64 = "no" ?>
     <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
-    <?define BinFolder = "$(var.SrcFolder)\Release" ?>
+    <?define BinFolder = "$(var.SrcFolder)\Release\x86" ?>
     <?define AddonBinFolder = "files32" ?>
   <?endif ?>
 </Include>

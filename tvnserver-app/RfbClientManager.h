@@ -81,6 +81,12 @@ public:
   // FIXME: This method needed only for control server.
   void getClientsInfo(RfbClientInfoList *list);
 
+  // Adds information about ALL authenticated clients to the specified
+  // list, including the ones that have not yet completed the RFB
+  // initialization (not in the IN_NORMAL_PHASE). Used by the screen
+  // guard to show the warning as soon as a client authenticates.
+  void getAllClientsInfo(RfbClientInfoList *list);
+
   // Disconnects all connected clients.
   virtual void disconnectAllClients();
   virtual void disconnectNonAuthClients();

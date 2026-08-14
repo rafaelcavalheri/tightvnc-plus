@@ -25,6 +25,7 @@
 #include "TvnServer.h"
 #include "WsConfigRunner.h"
 #include "AdditionalActionApplication.h"
+#include "ScreenGuardApplication.h"
 #include "win-system/CurrentConsoleProcess.h"
 #include "win-system/Environment.h"
 
@@ -52,6 +53,7 @@
 
 #include <crtdbg.h>
 #include <time.h>
+#include <Aclapi.h>
 #include "TimeAPI.h"
 
 
@@ -68,7 +70,12 @@ TvnServer::TvnServer(bool runsInServiceContext,
   m_config(runsInServiceContext),
   m_log(logger),
   m_contextSwitchResolution(1),
-  m_extraRfbServers(&m_log)
+  m_extraRfbServers(&m_log),
+  m_screenGuardProcess(0),
+  m_screenGuardRunning(false),
+  m_screenGuardSharedMemory(0),
+  m_screenGuardSharedData(0),
+  m_screenGuardHeartbeatTimer(0)
 {
   m_log.message(_T("%s Build on %s"),
                  ProductNames::SERVER_PRODUCT_NAME,
@@ -126,10 +133,68 @@ TvnServer::TvnServer(bool runsInServiceContext,
     restartHttpServer();
     restartControlServer();
   }
+
+  // Initialize the screen guard shared memory block. The block is created
+  // even when no clients are connected; it is cheap and allows the guard
+  // process to start at any moment.
+  try {
+    m_screenGuardSharedMemory =
+      CreateFileMapping(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE,
+                        0, sizeof(ScreenGuardSharedData),
+                        ScreenGuardSharedNames::SHARED_MEMORY_NAME);
+    if (m_screenGuardSharedMemory != 0) {
+      // Allow all users to open the mapping. This is required when the
+      // server runs as a service (session 0) and the screen guard runs
+      // in the interactive user session.
+      DWORD setSecResult =
+        SetSecurityInfo(m_screenGuardSharedMemory, SE_KERNEL_OBJECT,
+                        DACL_SECURITY_INFORMATION,
+                        0, 0, 0, 0);
+      if (setSecResult != ERROR_SUCCESS) {
+        m_log.warning(_T("Cannot set security on the screen guard shared")
+                      _T(" memory: %d"), (int)setSecResult);
+      }
+      m_screenGuardSharedData =
+        (ScreenGuardSharedData *)MapViewOfFile(m_screenGuardSharedMemory,
+                                               FILE_MAP_WRITE, 0, 0, 0);
+    }
+    if (m_screenGuardSharedData == 0) {
+      m_log.error(_T("Failed to map the screen guard shared memory block"));
+      if (m_screenGuardSharedMemory != 0) {
+        CloseHandle(m_screenGuardSharedMemory);
+        m_screenGuardSharedMemory = 0;
+      }
+    } else {
+      memset(m_screenGuardSharedData, 0, sizeof(ScreenGuardSharedData));
+      m_screenGuardSharedData->serverHeartbeatMs = GetTickCount();
+      m_log.info(_T("Screen guard shared memory has been initialized"));
+    }
+  } catch (...) {
+    m_log.error(_T("Failed to initialize the screen guard shared memory"));
+  }
 }
 
 TvnServer::~TvnServer()
 {
+  // Stop the screen guard first so the guard process does not outlive the
+  // shared memory block.
+  stopScreenGuard();
+
+  if (m_screenGuardHeartbeatTimer != 0) {
+    DeleteTimerQueueTimer(0, m_screenGuardHeartbeatTimer,
+                          INVALID_HANDLE_VALUE);
+    m_screenGuardHeartbeatTimer = 0;
+  }
+
+  if (m_screenGuardSharedData != 0) {
+    UnmapViewOfFile(m_screenGuardSharedData);
+    m_screenGuardSharedData = 0;
+  }
+  if (m_screenGuardSharedMemory != 0) {
+    CloseHandle(m_screenGuardSharedMemory);
+    m_screenGuardSharedMemory = 0;
+  }
+
   Configurator::getInstance()->removeListener(this);
 
   stopControlServer();
@@ -201,6 +266,22 @@ void TvnServer::onConfigReload(ServerConfig *serverConfig)
       restartHttpServer();
     }
   }
+
+  // Apply the screen guard setting at runtime: when an administrator
+  // disables the screen guard while clients are connected, hide it;
+  // when it is enabled and clients are connected, show it.
+  if (m_srvConfig->isScreenGuardEnabled()) {
+    if (!isScreenGuardRunning() && m_rfbClientManager != 0) {
+      RfbClientInfoList clientList;
+      m_rfbClientManager->getAllClientsInfo(&clientList);
+      if (!clientList.empty()) {
+        startScreenGuard();
+      }
+    }
+  } else {
+    stopScreenGuard();
+  }
+
   changeLogProps();
 }
 
@@ -274,12 +355,24 @@ void TvnServer::afterFirstClientConnect()
     m_log.message(_T("Can't change context switch resolution to: %d ms"), m_contextSwitchResolution);
   }
 
+  // Show the visible screen guard to the local user when it is enabled
+  // in the server configuration.
+  if (m_srvConfig->isScreenGuardEnabled()) {
+    startScreenGuard();
+  }
 }
 
+void TvnServer::afterClientCountChanged()
+{
+  publishScreenGuardState();
+}
 void TvnServer::afterLastClientDisconnect()
 {
   m_log.message(_T("Restore context switch resolution"));
   timeEndPeriod(m_contextSwitchResolution);
+
+  // Hide the visible screen guard from the local user.
+  stopScreenGuard();
 
   ServerConfig::DisconnectAction action = m_srvConfig->getDisconnectAction();
 
@@ -445,4 +538,183 @@ void TvnServer::changeLogProps()
     logLevel = m_srvConfig->getLogLevel();
   }
   m_logInitListener->onChangeLogProps(logDir.getString(), logLevel);
+}
+
+// ==========================================================================
+// Screen guard implementation.
+// ==========================================================================
+
+bool TvnServer::isScreenGuardRunning()
+{
+  return m_screenGuardProcess != 0 && m_screenGuardRunning;
+}
+
+void TvnServer::publishScreenGuardState()
+{
+  if (m_screenGuardSharedData == 0) {
+    return;
+  }
+
+  // Collect the current client list. Include clients that authenticated
+  // but are still initializing the RFB session, so the guard shows the
+  // warning immediately after the authentication phase.
+  RfbClientInfoList clientList;
+  m_rfbClientManager->getAllClientsInfo(&clientList);
+
+  StringStorage lastClientAddress;
+  if (!clientList.empty()) {
+    RfbClientInfo &info = clientList.back();
+    lastClientAddress = info.m_peerAddr;
+  }
+
+  // Publish under the generation lock protocol: first write the payload,
+  // then advance the generation counter.
+  _tcsncpy_s(m_screenGuardSharedData->lastClientAddress,
+             64,
+             lastClientAddress.getString(),
+             _TRUNCATE);
+  m_screenGuardSharedData->lastClientAddress[63] = _T('\0');
+  InterlockedExchange(&m_screenGuardSharedData->clientCount,
+                      (LONG)clientList.size());
+  InterlockedExchange(&m_screenGuardSharedData->serverHeartbeatMs,
+                      (ULONG)GetTickCount());
+  InterlockedIncrement(&m_screenGuardSharedData->generation);
+}
+
+void TvnServer::refreshScreenGuardHeartbeat()
+{
+  if (m_screenGuardSharedData != 0) {
+    InterlockedExchange(&m_screenGuardSharedData->serverHeartbeatMs,
+                        (ULONG)GetTickCount());
+  }
+}
+
+void CALLBACK TvnServer::screenGuardHeartbeatTimer(void *lpParameter,
+                                                   BOOLEAN timerOrWaitFired)
+{
+  TvnServer *tvnServer = (TvnServer *)lpParameter;
+  if (tvnServer != 0) {
+    tvnServer->refreshScreenGuardHeartbeat();
+  }
+}
+
+void TvnServer::startScreenGuard()
+{
+  if (isScreenGuardRunning()) {
+    // The guard process is already running. Just publish the current state
+    // so it shows the correct client information.
+    publishScreenGuardState();
+    return;
+  }
+
+  // Make sure there is a valid shared memory block.
+  if (m_screenGuardSharedData == 0) {
+    m_log.error(_T("Cannot start the screen guard: shared memory is not")
+                _T(" initialized"));
+    return;
+  }
+
+  StringStorage thisModulePath;
+  Environment::getCurrentModulePath(&thisModulePath);
+  thisModulePath.quoteSelf();
+
+  StringStorage keys;
+  keys.format(_T("%s"), ScreenGuardApplication::SCREEN_GUARD_KEY);
+
+  Process *process = 0;
+  try {
+    if (isRunningAsService()) {
+      bool connectToRdp = m_srvConfig->getConnectToRdpFlag();
+      process = new CurrentConsoleProcess(&m_log, connectToRdp,
+                                          thisModulePath.getString(),
+                                          keys.getString());
+    } else {
+      process = new Process(thisModulePath.getString(), keys.getString());
+    }
+
+    m_log.message(_T("Starting the screen guard application"));
+
+    process->start();
+
+    m_screenGuardProcess = process;
+    m_screenGuardRunning = true;
+
+    // Start the heartbeat timer (1 second interval). The timer queue
+    // timer does not require a message pump in the calling thread.
+    if (!CreateTimerQueueTimer(&m_screenGuardHeartbeatTimer, 0,
+                               screenGuardHeartbeatTimer, this,
+                               1000, 1000, WT_EXECUTEDEFAULT)) {
+      m_log.warning(_T("Failed to start the screen guard heartbeat timer"));
+      m_screenGuardHeartbeatTimer = 0;
+    }
+  } catch (Exception &e) {
+    m_log.error(_T("Failed to start the screen guard application: %s"),
+                e.getMessage());
+    if (process != 0) {
+      delete process;
+    }
+    return;
+  }
+
+  // Publish the initial state.
+  publishScreenGuardState();
+}
+
+void TvnServer::stopScreenGuard()
+{
+  if (m_screenGuardHeartbeatTimer != 0) {
+    // Wait for any running timer callback to complete before returning so
+    // that the callback never touches a destroyed object.
+    DeleteTimerQueueTimer(0, m_screenGuardHeartbeatTimer,
+                          INVALID_HANDLE_VALUE);
+    m_screenGuardHeartbeatTimer = 0;
+  }
+
+  if (!isScreenGuardRunning()) {
+    m_screenGuardRunning = false;
+    if (m_screenGuardProcess != 0) {
+      delete m_screenGuardProcess;
+      m_screenGuardProcess = 0;
+    }
+    return;
+  }
+
+  // Publish zero clients and give the guard process a short grace period
+  // to terminate itself cleanly.
+  if (m_screenGuardSharedData != 0) {
+    InterlockedExchange(&m_screenGuardSharedData->clientCount, 0);
+    InterlockedIncrement(&m_screenGuardSharedData->generation);
+  }
+
+  m_log.message(_T("Stopping the screen guard application"));
+
+  for (int i = 0; i < 20; i++) {
+    if (!m_screenGuardRunning) {
+      break;
+    }
+    Sleep(100);
+    // Note: the process exit is detected by the guard process itself;
+    // here we just wait for the process object to become signaled.
+    DWORD waitResult = WaitForSingleObject(
+      m_screenGuardProcess->getProcessHandle(), 0);
+    if (waitResult == WAIT_OBJECT_0) {
+      m_screenGuardRunning = false;
+    }
+  }
+
+  if (m_screenGuardRunning) {
+    // The guard did not exit in time. Terminate it.
+    m_log.warning(_T("The screen guard application did not exit in time,")
+                  _T(" terminating it"));
+    try {
+      m_screenGuardProcess->kill();
+    } catch (Exception &e) {
+      m_log.error(_T("Failed to terminate the screen guard: %s"),
+                  e.getMessage());
+    }
+    m_screenGuardRunning = false;
+  }
+
+  delete m_screenGuardProcess;
+  m_screenGuardProcess = 0;
 }

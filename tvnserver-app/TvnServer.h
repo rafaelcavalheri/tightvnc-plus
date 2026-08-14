@@ -49,6 +49,9 @@
 #include "tvncontrol-app/TvnServerInfo.h"
 #include "LogInitListener.h"
 
+#include "ScreenGuardApplication.h"
+#include "win-system/Process.h"
+
 /**
  * TightVNC server singleton that includes serveral components:
  *   1) Zombie killer singleton.
@@ -141,6 +144,14 @@ public:
    */
   virtual void afterLastClientDisconnect();
 
+  /**
+   * Implemented from RfbClientManagerEventListener.
+   *
+   * Publishes the current client state to the screen guard shared memory
+   * when the number of connected clients changes.
+   */
+  virtual void afterClientCountChanged();
+
 protected:
   void restartHttpServer();
   void restartControlServer();
@@ -153,7 +164,34 @@ protected:
   // Calls a callback function to change update log properties.
   void changeLogProps();
 
-protected:
+  // ---------- Screen guard support ----------
+
+  // Starts the screen guard application in the interactive user session.
+  // Does nothing if it is already running.
+  void startScreenGuard();
+
+  // Requests the screen guard application to exit and stops it after a
+  // short grace period.
+  void stopScreenGuard();
+
+  // Publishes the current client state into the shared memory block used
+  // by the screen guard. Called on client connect/disconnect events.
+  void publishScreenGuardState();
+
+  // Publishes the heartbeat into the shared memory block. Called from the
+  // guard heartbeat timer.
+  void refreshScreenGuardHeartbeat();
+
+  // Returns true if the screen guard application has been started.
+  bool isScreenGuardRunning();
+
+  // Called by the timer queue thread to refresh the guard heartbeat.
+  static void CALLBACK screenGuardHeartbeatTimer(void *lpParameter,
+                                                 BOOLEAN timerOrWaitFired);
+
+  /**
+   * Log writer.
+   */
   LogWriter m_log;
   ZombieKiller m_zombieKiller;
 
@@ -208,6 +246,27 @@ protected:
   LogInitListener *m_logInitListener;
 
   UINT m_contextSwitchResolution; // in ms
+
+  // ---------- Screen guard members ----------
+
+  // Process object of the running screen guard application. Zero when the
+  // guard is not running.
+  Process *m_screenGuardProcess;
+
+  // True when the screen guard application has been started and the stop
+  // request has not been sent yet.
+  bool m_screenGuardRunning;
+
+  // Handle to the shared memory mapping used to communicate with the
+  // screen guard process.
+  HANDLE m_screenGuardSharedMemory;
+
+  // Pointer to the mapped view of the shared memory block.
+  ScreenGuardSharedData *m_screenGuardSharedData;
+
+  // Timer that refreshes the heartbeat in the shared memory block. This
+  // is a timer queue timer handle created by CreateTimerQueueTimer().
+  HANDLE m_screenGuardHeartbeatTimer;
 };
 
 #endif

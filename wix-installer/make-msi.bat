@@ -49,8 +49,16 @@ goto :exit
 :build_msi
 
 candle.exe -dConfiguration=Release -dOutDir=%OUT_DIR%\ -dPlatform=%TARGET_PLATFORM% -dTargetDir=%OUT_DIR%\ -dTargetExt=.msi -dTargetFileName=%OUTPUT_MSI_NAME%.msi -dTargetName=%OUTPUT_MSI_NAME% -dTargetPath=%OUT_DIR%\%OUTPUT_MSI_NAME%.msi -dNoLicense=%NO_LICENSE_VALUE% %VAR1% -out %OUT_DIR%\wixobj\ -arch %TARGET_PLATFORM% -ext WixFirewallExtension.dll -ext WixUtilExtension.dll -ext WixUIExtension.dll components.wxs custom_actions.wxs features.wxs gui.wxs gui_pages.wxs Properties.wxs setup.wxs
+if errorlevel 1 (
+  echo candle.exe failed for %TARGET_PLATFORM%.
+  exit /b 1
+)
 
 Light.exe -cultures:null -ext WixFirewallExtension.dll -ext WixUtilExtension.dll -ext WixUIExtension.dll -out %OUT_DIR%\%OUTPUT_MSI_NAME%.msi -pdbout %OUT_DIR%\setup.wixpdb -spdb %OUT_DIR%\wixobj\components.wixobj %OUT_DIR%\wixobj\custom_actions.wixobj %OUT_DIR%\wixobj\features.wixobj %OUT_DIR%\wixobj\gui.wixobj %OUT_DIR%\wixobj\gui_pages.wixobj %OUT_DIR%\wixobj\Properties.wixobj %OUT_DIR%\wixobj\setup.wixobj
+if errorlevel 1 (
+  echo Light.exe failed for %TARGET_PLATFORM%.
+  exit /b 1
+)
 
 goto :eof
 

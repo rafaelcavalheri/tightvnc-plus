@@ -118,6 +118,9 @@ public:
   void enableRemovingDesktopWallpaper(bool enabled);
   bool isRemovingDesktopWallpaperEnabled();
 
+  void enableScreenGuard(bool enabled);
+  bool isScreenGuardEnabled();
+
   void setDisconnectAction(DisconnectAction action);
   DisconnectAction getDisconnectAction();
 
@@ -299,6 +302,7 @@ protected:
 
   bool m_enableFileTransfers;
   bool m_removeWallpaper;
+  bool m_screenGuardEnabled;
   bool m_D3DAllowed;
   bool m_mirrorDriverAllowed;
   //
