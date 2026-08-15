@@ -61,6 +61,12 @@ public:
   void updateUI();
   void apply();
 
+  // Keeps the (hidden) "No local input during client sessions" check box
+  // in sync with the interactive copy now shown on the Connection tab, so
+  // the Input Handling group's dependent controls (updateCheckboxesState())
+  // still react correctly.
+  void setBlockLocalInputChecked(bool checked);
+
 private:
   void initControls();
   void updateControlDependencies();
@@ -85,7 +91,6 @@ private:
   void onPollingIntervalUpdate();
   void onFileTransferCheckBoxClick();
   void onRemoveWallpaperCheckBoxClick();
-  void onScreenGuardCheckBoxClick();
   void onGrabTransparentWindowsChanged();
   void onUseD3DChanged();
 
@@ -110,7 +115,6 @@ protected:
   CheckBox m_useMirrorDriver;
   CheckBox m_enableFileTransfers;
   CheckBox m_removeWallpaper;
-  CheckBox m_screenGuard;
   CheckBox m_acceptRfbConnections;
   CheckBox m_acceptHttpConnections;
   CheckBox m_showTrayIcon;

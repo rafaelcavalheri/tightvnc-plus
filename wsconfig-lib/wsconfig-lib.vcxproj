@@ -395,6 +395,7 @@
     <ClCompile Include="ChangePasswordDialog.cpp" />
     <ClCompile Include="CommonInputValidation.cpp" />
     <ClCompile Include="ConfigDialog.cpp" />
+    <ClCompile Include="ConnectionConfigDialog.cpp" />
     <ClCompile Include="EditIpAccessRuleDialog.cpp" />
     <ClCompile Include="EditPortMappingDialog.cpp" />
     <ClCompile Include="IpAccessControlDialog.cpp" />
@@ -410,6 +411,7 @@
     <ClInclude Include="ChangePasswordDialog.h" />
     <ClInclude Include="CommonInputValidation.h" />
     <ClInclude Include="ConfigDialog.h" />
+    <ClInclude Include="ConnectionConfigDialog.h" />
     <ClInclude Include="EditIpAccessRuleDialog.h" />
     <ClInclude Include="EditPortMappingDialog.h" />
     <ClInclude Include="IpAccessControlDialog.h" />

@@ -28,6 +28,7 @@
 #include "ScreenGuardApplication.h"
 #include "win-system/CurrentConsoleProcess.h"
 #include "win-system/Environment.h"
+#include "win-system/WTS.h"
 
 #include "server-config-lib/Configurator.h"
 
@@ -73,6 +74,7 @@ TvnServer::TvnServer(bool runsInServiceContext,
   m_extraRfbServers(&m_log),
   m_screenGuardProcess(0),
   m_screenGuardRunning(false),
+  m_screenGuardSessionId(0),
   m_screenGuardSharedMemory(0),
   m_screenGuardSharedData(0),
   m_screenGuardHeartbeatTimer(0)
@@ -587,6 +589,7 @@ void TvnServer::refreshScreenGuardHeartbeat()
     InterlockedExchange(&m_screenGuardSharedData->serverHeartbeatMs,
                         (ULONG)GetTickCount());
   }
+  ensureScreenGuardInCurrentSession();
 }
 
 void CALLBACK TvnServer::screenGuardHeartbeatTimer(void *lpParameter,
@@ -598,20 +601,30 @@ void CALLBACK TvnServer::screenGuardHeartbeatTimer(void *lpParameter,
   }
 }
 
-void TvnServer::startScreenGuard()
+DWORD TvnServer::getScreenGuardTargetSessionId()
 {
-  if (isScreenGuardRunning()) {
-    // The guard process is already running. Just publish the current state
-    // so it shows the correct client information.
-    publishScreenGuardState();
-    return;
+  if (!isRunningAsService()) {
+    DWORD processSessionId = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &processSessionId);
+    return processSessionId;
   }
 
+  if (isRunningAsService() && m_srvConfig->getConnectToRdpFlag()) {
+    DWORD rdpSessionId = WTS::getRdpSessionId(&m_log);
+    if (rdpSessionId != 0) {
+      return rdpSessionId;
+    }
+  }
+  return WTS::getActiveConsoleSessionId(&m_log);
+}
+
+bool TvnServer::launchScreenGuardProcess()
+{
   // Make sure there is a valid shared memory block.
   if (m_screenGuardSharedData == 0) {
     m_log.error(_T("Cannot start the screen guard: shared memory is not")
                 _T(" initialized"));
-    return;
+    return false;
   }
 
   StringStorage thisModulePath;
@@ -638,26 +651,89 @@ void TvnServer::startScreenGuard()
 
     m_screenGuardProcess = process;
     m_screenGuardRunning = true;
-
-    // Start the heartbeat timer (1 second interval). The timer queue
-    // timer does not require a message pump in the calling thread.
-    if (!CreateTimerQueueTimer(&m_screenGuardHeartbeatTimer, 0,
-                               screenGuardHeartbeatTimer, this,
-                               1000, 1000, WT_EXECUTEDEFAULT)) {
-      m_log.warning(_T("Failed to start the screen guard heartbeat timer"));
-      m_screenGuardHeartbeatTimer = 0;
-    }
+    m_screenGuardSessionId = getScreenGuardTargetSessionId();
   } catch (Exception &e) {
     m_log.error(_T("Failed to start the screen guard application: %s"),
                 e.getMessage());
     if (process != 0) {
-      delete process;
+        delete process;
     }
-    return;
+    return false;
   }
 
   // Publish the initial state.
   publishScreenGuardState();
+  return true;
+}
+
+void TvnServer::startScreenGuard()
+{
+  if (isScreenGuardRunning()) {
+    // The guard process is already running. Just publish the current state
+    // so it shows the correct client information.
+    publishScreenGuardState();
+    return;
+  }
+
+  if (!launchScreenGuardProcess()) {
+    return;
+  }
+
+  // Start the heartbeat timer (1 second interval). The timer queue
+  // timer does not require a message pump in the calling thread.
+  if (m_screenGuardHeartbeatTimer == 0 &&
+      !CreateTimerQueueTimer(&m_screenGuardHeartbeatTimer, 0,
+                             screenGuardHeartbeatTimer, this,
+                             1000, 1000, WT_EXECUTEDEFAULT)) {
+    m_log.warning(_T("Failed to start the screen guard heartbeat timer"));
+    m_screenGuardHeartbeatTimer = 0;
+  }
+}
+
+void TvnServer::ensureScreenGuardInCurrentSession()
+{
+  if (!m_srvConfig->isScreenGuardEnabled() || !isScreenGuardRunning()) {
+    return;
+  }
+  if (m_rfbClientManager == 0) {
+    return;
+  }
+
+  RfbClientInfoList clientList;
+  m_rfbClientManager->getAllClientsInfo(&clientList);
+  if (clientList.empty()) {
+    return;
+  }
+
+  DWORD currentSessionId = getScreenGuardTargetSessionId();
+  DWORD waitResult = WaitForSingleObject(
+    m_screenGuardProcess->getProcessHandle(), 0);
+  if (waitResult != WAIT_OBJECT_0 &&
+      currentSessionId == m_screenGuardSessionId) {
+    return;
+  }
+
+  if (waitResult == WAIT_OBJECT_0) {
+    m_log.message(_T("Screen guard process exited; restarting it"));
+  } else {
+    m_log.message(_T("Screen guard session changed from %u to %u;"
+                     " restarting it"),
+                  (unsigned int)m_screenGuardSessionId,
+                  (unsigned int)currentSessionId);
+    try {
+      m_screenGuardProcess->kill();
+    } catch (Exception &e) {
+      m_log.error(_T("Failed to terminate stale screen guard: %s"),
+                  e.getMessage());
+    }
+  }
+
+  delete m_screenGuardProcess;
+  m_screenGuardProcess = 0;
+  m_screenGuardRunning = false;
+  m_screenGuardSessionId = 0;
+
+  launchScreenGuardProcess();
 }
 
 void TvnServer::stopScreenGuard()
@@ -676,6 +752,7 @@ void TvnServer::stopScreenGuard()
       delete m_screenGuardProcess;
       m_screenGuardProcess = 0;
     }
+    m_screenGuardSessionId = 0;
     return;
   }
 
@@ -717,4 +794,5 @@ void TvnServer::stopScreenGuard()
 
   delete m_screenGuardProcess;
   m_screenGuardProcess = 0;
+  m_screenGuardSessionId = 0;
 }

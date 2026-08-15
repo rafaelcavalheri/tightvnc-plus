@@ -66,6 +66,9 @@ Source: "{#SrcRoot}\wix-installer\LICENSE.txt"; DestDir: "{app}"; Flags: ignorev
 Source: "{#SrcRoot}\logo.png"; DestDir: "{app}"; Flags: ignoreversion
 ; Imagem de tela cheia (substitui o banner quando presente).
 Source: "{#SrcRoot}\tela.png"; DestDir: "{app}"; Flags: ignoreversion
+; Icones da aba Connection (olho / mouse).
+Source: "{#SrcRoot}\eye.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\mouse.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\TightVNC Server - Control Interface"; Filename: "{app}\tvnserver.exe"; Parameters: "-controlservice"

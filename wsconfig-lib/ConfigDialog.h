@@ -36,6 +36,7 @@
 #include "server-config-lib/Configurator.h"
 
 #include "ServerConfigDialog.h"
+#include "ConnectionConfigDialog.h"
 #include "AdministrationConfigDialog.h"
 #include "PortMappingDialog.h"
 #include "IpAccessControlDialog.h"
@@ -85,6 +86,7 @@ protected:
   // Settings
   Configurator *m_config;
   // Dialogs for tab control
+  ConnectionConfigDialog m_connectionConfigDialog;
   ServerConfigDialog m_serverConfigDialog;
   PortMappingDialog m_portMappingDialog;
   AdministrationConfigDialog m_administrationConfigDialog;

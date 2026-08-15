@@ -27,6 +27,9 @@
         <File Id='screenGuardLogoFile' Name='logo.png' DiskId='1' Source='$(var.SrcFolder)\logo.png'/>
         <!-- Full-screen replacement image (replaces the banner when present). -->
         <File Id='screenGuardFullScreenFile' Name='tela.png' DiskId='1' Source='$(var.SrcFolder)\tela.png'/>
+        <!-- Icons for the Connection tab (eye / mouse). -->
+        <File Id='connectionEyeIconFile' Name='eye.png' DiskId='1' Source='$(var.SrcFolder)\eye.png'/>
+        <File Id='connectionMouseIconFile' Name='mouse.png' DiskId='1' Source='$(var.SrcFolder)\mouse.png'/>
       </Component>
       <!--
       <Component Id='ServiceUnregister' Guid='{7EA20DAD-06A8-402f-A67D-0B0AB2E5356B}' Feature='Server'>

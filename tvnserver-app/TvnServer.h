@@ -170,6 +170,17 @@ protected:
   // Does nothing if it is already running.
   void startScreenGuard();
 
+  // Starts only the screen guard process in the current interactive session.
+  // The heartbeat timer is managed by startScreenGuard().
+  bool launchScreenGuardProcess();
+
+  // Restarts the screen guard process if the active interactive session
+  // changed while remote clients are still connected.
+  void ensureScreenGuardInCurrentSession();
+
+  // Returns the session where the screen guard should be visible.
+  DWORD getScreenGuardTargetSessionId();
+
   // Requests the screen guard application to exit and stops it after a
   // short grace period.
   void stopScreenGuard();
@@ -256,6 +267,9 @@ protected:
   // True when the screen guard application has been started and the stop
   // request has not been sent yet.
   bool m_screenGuardRunning;
+
+  // Session id where the current screen guard process was started.
+  DWORD m_screenGuardSessionId;
 
   // Handle to the shared memory mapping used to communicate with the
   // screen guard process.

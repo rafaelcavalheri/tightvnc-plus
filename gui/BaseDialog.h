@@ -60,6 +60,11 @@ public:
   void setResourceName(const TCHAR *resourceName);
   // Set resource id for dialog.
   void setResourceId(DWORD id);
+  // Use an in-memory dialog template instead of a compiled resource. Lets a
+  // page be added without editing the (UTF-16) .rc resource file: build a
+  // minimal DLGTEMPLATE with 0 controls and add controls at runtime from
+  // onInitDialog(), the same way the other pages add extra controls.
+  void setDialogTemplate(LPCDLGTEMPLATE dlgTemplate);
   // Return
   Control *getControl() { return &m_ctrlThis; }
   // Setup control by ID
@@ -110,6 +115,7 @@ protected:
 
   TCHAR *m_resourceName;        // Name of dialog resource
   DWORD m_resourceId;            // Id of dialog resouce
+  LPCDLGTEMPLATE m_dialogTemplate; // In-memory template (see setDialogTemplate)
   Control m_ctrlThis;           // This dialog control
   Control *m_ctrlParent;        // Parent dialog or NULL if no parent
 

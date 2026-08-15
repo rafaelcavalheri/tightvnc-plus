@@ -36,6 +36,13 @@ set "PF86=%ProgramFiles(x86)%"
 set "PF=%ProgramFiles%"
 set "WIND=%WINDIR%"
 
+rem Normalize PATH before invoking vcvarsall/MSBuild. Some PowerShell
+rem environments expose both PATH and Path; MSBuild's CL task treats
+rem environment variable names case-insensitively and can fail with:
+rem "An item with the same key has already been added. Key: PATH/Path".
+if defined Path set "PATH=%Path%"
+set "Path="
+
 set VSWHERE=
 if not exist "%PF86%\Microsoft Visual Studio\Installer\vswhere.exe" goto :vswhere_pf_check
 set "VSWHERE=%PF86%\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -137,7 +144,7 @@ echo.
 
 rem The solution targets the v140_xp toolset (VS 2015 + Windows XP support)
 rem which is not installed. Override it with the current toolset (v143).
-"%MSBUILD%" "%SOLUTION%" /m /t:Rebuild /p:Configuration=Release /p:Platform=%PLATFORM% /p:PlatformToolset=v143 /v:minimal /nologo
+"%MSBUILD%" "%SOLUTION%" /t:Rebuild /p:Configuration=Release /p:Platform=%PLATFORM% /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /v:minimal /nologo
 if errorlevel 1 (
   echo.
   echo BUILD FAILED.

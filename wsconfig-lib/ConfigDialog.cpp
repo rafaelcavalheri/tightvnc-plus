@@ -140,10 +140,17 @@ BOOL ConfigDialog::onInitDialog()
 
   m_tabControl.addTab(NULL, _T("Temp"));
 
+  m_connectionConfigDialog.setParent(&m_ctrlThis);
+  m_connectionConfigDialog.setParentDialog(this);
+  m_connectionConfigDialog.create();
+  moveDialogToTabControl(&m_connectionConfigDialog);
+
   m_serverConfigDialog.setParent(&m_ctrlThis);
   m_serverConfigDialog.setParentDialog(this);
   m_serverConfigDialog.create();
   moveDialogToTabControl(&m_serverConfigDialog);
+
+  m_connectionConfigDialog.setServerConfigDialog(&m_serverConfigDialog);
 
   m_portMappingDialog.setParent(&m_ctrlThis);
   m_portMappingDialog.setParentDialog(this);
@@ -166,6 +173,7 @@ BOOL ConfigDialog::onInitDialog()
   m_videoRegionsConfigDialog.create();
   moveDialogToTabControl(&m_videoRegionsConfigDialog);
 
+  m_tabControl.addTab(&m_connectionConfigDialog, _T("Connection"));
   m_tabControl.addTab(&m_serverConfigDialog, StringTable::getString(IDS_SERVER_TAB_CAPTION));
   m_tabControl.addTab(&m_portMappingDialog, StringTable::getString(IDS_EXTRA_PORTS_TAB_CAPTION));
   m_tabControl.addTab(&m_ipAccessControlDialog, StringTable::getString(IDS_ACCESS_CONTROL_TAB_CAPTION));
@@ -210,6 +218,7 @@ void ConfigDialog::onApplyButtonClick()
 
   // Fill global server configuration with values from gui.
   if (canApply) {
+    m_connectionConfigDialog.apply();
     m_administrationConfigDialog.apply();
     m_serverConfigDialog.apply();
     m_ipAccessControlDialog.apply();

@@ -30,19 +30,27 @@
 #include <crtdbg.h>
 
 BaseDialog::BaseDialog()
-: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(0), m_hicon(0)
+: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(0), m_hicon(0),
+  m_dialogTemplate(0)
 {
 }
 
 BaseDialog::BaseDialog(DWORD resourceId)
-: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(resourceId), m_hicon(0)
+: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(resourceId), m_hicon(0),
+  m_dialogTemplate(0)
 {
 }
 
 BaseDialog::BaseDialog(const TCHAR *resourceName)
-: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(0), m_hicon(0)
+: m_ctrlParent(NULL), m_resourceName(0), m_resourceId(0), m_hicon(0),
+  m_dialogTemplate(0)
 {
   setResourceName(resourceName);
+}
+
+void BaseDialog::setDialogTemplate(LPCDLGTEMPLATE dlgTemplate)
+{
+  m_dialogTemplate = dlgTemplate;
 }
 
 BaseDialog::~BaseDialog()
@@ -114,8 +122,13 @@ void BaseDialog::create()
     parentWindow = m_ctrlParent->getWindow();
   }
 
-  window = CreateDialogParam(GetModuleHandle(NULL), getResouceName(),
-                             parentWindow, dialogProc, (LPARAM)this);
+  if (m_dialogTemplate != 0) {
+    window = CreateDialogIndirectParam(GetModuleHandle(NULL), m_dialogTemplate,
+                                       parentWindow, dialogProc, (LPARAM)this);
+  } else {
+    window = CreateDialogParam(GetModuleHandle(NULL), getResouceName(),
+                               parentWindow, dialogProc, (LPARAM)this);
+  }
 
   m_isModal = false;
 
