@@ -28,6 +28,7 @@
 #include "tvnserver/resource_connectiontab.h"
 #include "server-config-lib/Configurator.h"
 #include "win-system/Environment.h"
+#include "util/GdiplusPngLoader.h"
 
 #include <gdiplus.h>
 
@@ -129,7 +130,14 @@ BOOL ConnectionConfigDialog::onInitDialog()
   }
   int rowTop = 16;
 
-  m_eyeIcon = loadIconBitmap(_T("eye.png"), iconSize);
+  // Start GDI+ once for both icon loads below (loadIconBitmap() no longer
+  // starts/stops it itself).
+  GdiplusStartupInput gdiplusStartupInput;
+  ULONG_PTR gdiplusToken = 0;
+  bool gdiplusStarted =
+    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, 0) == Ok;
+
+  m_eyeIcon = gdiplusStarted ? loadIconBitmap(_T("eye.png"), iconSize) : 0;
   if (m_eyeIcon != 0) {
     HWND iconHwnd = CreateWindowEx(0, _T("STATIC"), _T(""),
       WS_CHILD | WS_VISIBLE | SS_BITMAP,
@@ -150,7 +158,7 @@ BOOL ConnectionConfigDialog::onInitDialog()
 
   rowTop += rowHeight;
 
-  m_mouseIcon = loadIconBitmap(_T("mouse.png"), iconSize);
+  m_mouseIcon = gdiplusStarted ? loadIconBitmap(_T("mouse.png"), iconSize) : 0;
   if (m_mouseIcon != 0) {
     HWND iconHwnd = CreateWindowEx(0, _T("STATIC"), _T(""),
       WS_CHILD | WS_VISIBLE | SS_BITMAP,
@@ -167,6 +175,10 @@ BOOL ConnectionConfigDialog::onInitDialog()
     parent, (HMENU)IDC_CONNECTION_BLOCK_LOCAL_INPUT, hInstance, 0);
   if (blockLocalInputHwnd != 0 && dlgFont != 0) {
     SendMessage(blockLocalInputHwnd, WM_SETFONT, (WPARAM)dlgFont, TRUE);
+  }
+
+  if (gdiplusStarted) {
+    GdiplusShutdown(gdiplusToken);
   }
 
   m_screenGuard.setWindow(GetDlgItem(parent, IDC_SCREEN_GUARD));
@@ -232,13 +244,17 @@ void ConnectionConfigDialog::updateUI()
 void ConnectionConfigDialog::apply()
 {
   m_config->enableScreenGuard(m_screenGuard.isChecked());
-  // "No local input during client sessions" is written to the
-  // configuration by ServerConfigDialog::apply(), from its (hidden, kept
-  // in sync via setBlockLocalInputChecked()) copy of this check box.
+  // This is the interactive check box the user actually clicks; it is the
+  // single source of truth for the setting. The hidden mirror on the
+  // Server page (kept in sync via setBlockLocalInputChecked()) exists only
+  // to drive ServerConfigDialog::updateCheckboxesState() and is never
+  // itself persisted.
+  m_config->blockLocalInput(m_blockLocalInput.isChecked());
 }
 
 HBITMAP ConnectionConfigDialog::loadIconBitmap(const TCHAR *fileName, int targetSize)
 {
+  // GDI+ must already be started by the caller (see onInitDialog()).
   StringStorage moduleFolder;
   if (!Environment::getCurrentModuleFolderPath(&moduleFolder)) {
     return 0;
@@ -246,51 +262,5 @@ HBITMAP ConnectionConfigDialog::loadIconBitmap(const TCHAR *fileName, int target
   StringStorage imagePath;
   imagePath.format(_T("%s\\%s"), moduleFolder.getString(), fileName);
 
-  GdiplusStartupInput gdiplusStartupInput;
-  ULONG_PTR gdiplusToken = 0;
-  if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, 0) != Ok) {
-    return 0;
-  }
-
-  HBITMAP result = 0;
-  Bitmap *bitmap = 0;
-  try {
-    bitmap = Bitmap::FromFile(imagePath.getString());
-  } catch (...) {
-    bitmap = 0;
-  }
-  if (bitmap != 0 && bitmap->GetLastStatus() == Ok) {
-    BITMAPINFO bmi;
-    memset(&bmi, 0, sizeof(bmi));
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = targetSize;
-    bmi.bmiHeader.biHeight = -targetSize; // top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void *bits = 0;
-    HDC screenDc = GetDC(0);
-    HBITMAP hbmp = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, 0, 0);
-    HDC memDc = CreateCompatibleDC(screenDc);
-    ReleaseDC(0, screenDc);
-    if (hbmp != 0 && memDc != 0) {
-      HGDIOBJ oldBmp = SelectObject(memDc, hbmp);
-      Graphics graphics(memDc);
-      graphics.DrawImage(bitmap, 0, 0, targetSize, targetSize);
-      SelectObject(memDc, oldBmp);
-      result = hbmp;
-    } else if (hbmp != 0) {
-      DeleteObject(hbmp);
-    }
-    if (memDc != 0) {
-      DeleteDC(memDc);
-    }
-  }
-  if (bitmap != 0) {
-    delete bitmap;
-  }
-
-  GdiplusShutdown(gdiplusToken);
-  return result;
+  return LoadPngAsBitmap(imagePath.getString(), targetSize, targetSize);
 }

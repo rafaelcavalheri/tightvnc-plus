@@ -548,6 +548,7 @@ void TvnServer::changeLogProps()
 
 bool TvnServer::isScreenGuardRunning()
 {
+  AutoLock l(&m_screenGuardMutex);
   return m_screenGuardProcess != 0 && m_screenGuardRunning;
 }
 
@@ -620,6 +621,8 @@ DWORD TvnServer::getScreenGuardTargetSessionId()
 
 bool TvnServer::launchScreenGuardProcess()
 {
+  AutoLock l(&m_screenGuardMutex);
+
   // Make sure there is a valid shared memory block.
   if (m_screenGuardSharedData == 0) {
     m_log.error(_T("Cannot start the screen guard: shared memory is not")
@@ -668,6 +671,8 @@ bool TvnServer::launchScreenGuardProcess()
 
 void TvnServer::startScreenGuard()
 {
+  AutoLock l(&m_screenGuardMutex);
+
   if (isScreenGuardRunning()) {
     // The guard process is already running. Just publish the current state
     // so it shows the correct client information.
@@ -692,6 +697,8 @@ void TvnServer::startScreenGuard()
 
 void TvnServer::ensureScreenGuardInCurrentSession()
 {
+  AutoLock l(&m_screenGuardMutex);
+
   if (!m_srvConfig->isScreenGuardEnabled() || !isScreenGuardRunning()) {
     return;
   }
@@ -738,13 +745,31 @@ void TvnServer::ensureScreenGuardInCurrentSession()
 
 void TvnServer::stopScreenGuard()
 {
-  if (m_screenGuardHeartbeatTimer != 0) {
-    // Wait for any running timer callback to complete before returning so
-    // that the callback never touches a destroyed object.
-    DeleteTimerQueueTimer(0, m_screenGuardHeartbeatTimer,
-                          INVALID_HANDLE_VALUE);
+  // Detach and delete the heartbeat timer *before* taking
+  // m_screenGuardMutex. DeleteTimerQueueTimer(..., INVALID_HANDLE_VALUE)
+  // blocks until any in-flight callback finishes, and that callback
+  // (refreshScreenGuardHeartbeat -> ensureScreenGuardInCurrentSession)
+  // needs the same mutex to finish; waiting for it while holding the
+  // mutex would deadlock.
+  HANDLE heartbeatTimer = 0;
+  {
+    AutoLock l(&m_screenGuardMutex);
+    heartbeatTimer = m_screenGuardHeartbeatTimer;
     m_screenGuardHeartbeatTimer = 0;
   }
+  if (heartbeatTimer != 0) {
+    DeleteTimerQueueTimer(0, heartbeatTimer, INVALID_HANDLE_VALUE);
+  }
+
+  // Held for the rest of this function, including the up-to-2s wait loop
+  // below: this serializes stop against a concurrent startScreenGuard()/
+  // ensureScreenGuardInCurrentSession() on another thread (e.g. a client
+  // reconnecting while the previous one's guard is still shutting down),
+  // which may then block for that long. That is an accepted trade-off:
+  // holding the lock only around individual field reads/writes would let
+  // two threads race to launch a second guard process (the original bug
+  // this mutex fixes), which is worse than a bounded UI-visibility delay.
+  AutoLock l(&m_screenGuardMutex);
 
   if (!isScreenGuardRunning()) {
     m_screenGuardRunning = false;

@@ -271,6 +271,16 @@ protected:
   // Session id where the current screen guard process was started.
   DWORD m_screenGuardSessionId;
 
+  // Protects m_screenGuardProcess, m_screenGuardRunning,
+  // m_screenGuardSessionId and m_screenGuardHeartbeatTimer, which are
+  // mutated from the heartbeat timer thread (ensureScreenGuardInCurrentSession)
+  // as well as from client-connect/disconnect and config-reload threads
+  // (startScreenGuard/stopScreenGuard). A dedicated mutex (rather than
+  // m_mutex) keeps its hold time independent of RFB/HTTP/control server
+  // restarts. It is reentrant (backed by a Windows critical section), so
+  // nested calls from the same thread are safe.
+  LocalMutex m_screenGuardMutex;
+
   // Handle to the shared memory mapping used to communicate with the
   // screen guard process.
   HANDLE m_screenGuardSharedMemory;

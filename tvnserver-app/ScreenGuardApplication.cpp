@@ -31,6 +31,7 @@
 #include "util/Exception.h"
 #include "win-system/SharedMemory.h"
 #include "win-system/Environment.h"
+#include "util/GdiplusPngLoader.h"
 
 #include <gdiplus.h>
 
@@ -378,54 +379,10 @@ void ScreenGuardApplication::loadLogo()
   StringStorage logoPath;
   logoPath.format(_T("%s\\logo.png"), moduleFolder.getString());
 
-  Bitmap *bitmap = 0;
-  try {
-    bitmap = Bitmap::FromFile(logoPath.getString());
-  } catch (...) {
-    bitmap = 0;
-  }
-  if (bitmap == 0 || bitmap->GetLastStatus() != Ok) {
-    if (bitmap != 0) {
-      delete bitmap;
-    }
-    return;
-  }
-
-  m_logoWidth = bitmap->GetWidth();
-  m_logoHeight = bitmap->GetHeight();
-
   // Convert the GDI+ bitmap to a GDI HBITMAP for drawing with DrawImage/
-  // BitBlt in the banner WM_PAINT handler.
-  BITMAPINFO bmi;
-  memset(&bmi, 0, sizeof(bmi));
-  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = m_logoWidth;
-  bmi.bmiHeader.biHeight = -m_logoHeight; // top-down
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-
-  void *bits = 0;
-  HDC screenDc = GetDC(0);
-  HBITMAP hbmp = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS,
-                                  &bits, 0, 0);
-  HDC memDc = CreateCompatibleDC(screenDc);
-  ReleaseDC(0, screenDc);
-  if (hbmp == 0 || memDc == 0) {
-    if (hbmp != 0) DeleteObject(hbmp);
-    if (memDc != 0) DeleteDC(memDc);
-    delete bitmap;
-    return;
-  }
-
-  HGDIOBJ oldBmp = SelectObject(memDc, hbmp);
-  Graphics graphics(memDc);
-  graphics.DrawImage(bitmap, 0, 0, m_logoWidth, m_logoHeight);
-  SelectObject(memDc, oldBmp);
-  DeleteDC(memDc);
-  delete bitmap;
-
-  m_logoBitmap = hbmp;
+  // BitBlt in the banner WM_PAINT handler, keeping its native size.
+  m_logoBitmap = LoadPngAsBitmap(logoPath.getString(), 0, 0,
+                                 &m_logoWidth, &m_logoHeight);
 }
 
 void ScreenGuardApplication::loadFullScreenImage()
@@ -438,24 +395,11 @@ void ScreenGuardApplication::loadFullScreenImage()
   StringStorage imagePath;
   imagePath.format(_T("%s\\tela.png"), moduleFolder.getString());
 
-  Bitmap *bitmap = 0;
-  try {
-    bitmap = Bitmap::FromFile(imagePath.getString());
-  } catch (...) {
-    bitmap = 0;
-  }
-  if (bitmap == 0 || bitmap->GetLastStatus() != Ok) {
-    if (bitmap != 0) {
-      delete bitmap;
-    }
-    return;
-  }
-
   // Kept alive (not converted to a HBITMAP): the overlay window draws it
   // directly with GDI+ on every repaint, stretched to the current window
   // size. Must be deleted before GdiplusShutdown() runs -- see
   // destroyWindows().
-  m_fullScreenImage = bitmap;
+  m_fullScreenImage = LoadGdiplusBitmapFromFile(imagePath.getString());
 }
 
 // Standard OCR_* system cursor identifiers (winuser.h only declares them

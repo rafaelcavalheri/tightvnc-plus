@@ -308,7 +308,13 @@ void ServerConfigDialog::apply()
     timeout = max(0, timeout);
     m_config->setLocalInputPriorityTimeout((unsigned int)timeout);
   }
-  m_config->blockLocalInput(m_blockLocalInput.isChecked());
+  // "No local input during client sessions" is persisted by
+  // ConnectionConfigDialog::apply() from the interactive check box on the
+  // Connection tab. m_blockLocalInput here is only a hidden UI mirror kept
+  // in sync via setBlockLocalInputChecked(), used solely to drive
+  // updateCheckboxesState()'s Input Handling group; it must not be written
+  // back to the config, or a caller that updates it without going through
+  // ConnectionConfigDialog could silently overwrite the persisted setting.
   m_config->blockRemoteInput(m_blockRemoteInput.isChecked());
 
   m_config->setMirrorAllowing(m_useMirrorDriver.isChecked());
