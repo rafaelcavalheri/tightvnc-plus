@@ -546,6 +546,22 @@ void TvnServer::changeLogProps()
 // Screen guard implementation.
 // ==========================================================================
 
+// How long stopScreenGuard() waits for the guard process to exit on its own
+// before terminating it. The guard needs up to 2 s just to notice that the
+// client count dropped to zero (4 ticks of its 500 ms timer, see
+// ZERO_CLIENTS_EXIT_TICKS in ScreenGuardApplication.cpp) and then still has
+// to tear its windows down, so a 2 s budget here means practically every
+// stop ends in TerminateProcess even though the guard was about to exit
+// cleanly. The wait loop polls every 100 ms and returns as soon as the
+// process is gone, so a larger budget costs nothing in the normal case.
+static const int SCREEN_GUARD_EXIT_POLLS = 35; // 35 * 100 ms = 3.5 s
+
+// How long ensureScreenGuardInCurrentSession() gives a guard that is being
+// abandoned in a no longer active session to hide itself and restore the
+// system cursors before it is terminated. One guard timer tick (500 ms) is
+// enough; the rest is margin for a busy session.
+static const int SCREEN_GUARD_ABANDON_POLLS = 8; // 8 * 100 ms = 800 ms
+
 bool TvnServer::isScreenGuardRunning()
 {
   AutoLock l(&m_screenGuardMutex);
@@ -727,11 +743,39 @@ void TvnServer::ensureScreenGuardInCurrentSession()
                      " restarting it"),
                   (unsigned int)m_screenGuardSessionId,
                   (unsigned int)currentSessionId);
-    try {
-      m_screenGuardProcess->kill();
-    } catch (Exception &e) {
-      m_log.error(_T("Failed to terminate stale screen guard: %s"),
-                  e.getMessage());
+
+    // The guard is about to be abandoned in a session that is no longer the
+    // active one, but that session may still be alive (fast user switching,
+    // a disconnected RDP session). While the guard is visible it replaces
+    // every system cursor with a blank one (SetSystemCursor is session wide)
+    // and only puts them back from its own cleanup path, so terminating it
+    // right away would leave that session without a mouse pointer until the
+    // user logs off. Publish "no clients" first: on its next timer tick the
+    // guard hides its windows and restores the cursors, and only then is it
+    // killed. The real client count is published again by
+    // launchScreenGuardProcess() below.
+    if (m_screenGuardSharedData != 0) {
+      InterlockedExchange(&m_screenGuardSharedData->clientCount, 0);
+      InterlockedIncrement(&m_screenGuardSharedData->generation);
+    }
+
+    bool guardExited = false;
+    for (int i = 0; i < SCREEN_GUARD_ABANDON_POLLS; i++) {
+      if (WaitForSingleObject(m_screenGuardProcess->getProcessHandle(), 0) ==
+          WAIT_OBJECT_0) {
+        guardExited = true;
+        break;
+      }
+      Sleep(100);
+    }
+
+    if (!guardExited) {
+      try {
+        m_screenGuardProcess->kill();
+      } catch (Exception &e) {
+        m_log.error(_T("Failed to terminate stale screen guard: %s"),
+                    e.getMessage());
+      }
     }
   }
 
@@ -790,7 +834,7 @@ void TvnServer::stopScreenGuard()
 
   m_log.message(_T("Stopping the screen guard application"));
 
-  for (int i = 0; i < 20; i++) {
+  for (int i = 0; i < SCREEN_GUARD_EXIT_POLLS; i++) {
     if (!m_screenGuardRunning) {
       break;
     }
