@@ -32,6 +32,7 @@
 #include "win-system/SharedMemory.h"
 #include "win-system/Environment.h"
 #include "util/GdiplusPngLoader.h"
+#include "thread/DesktopSelector.h"
 
 #include <gdiplus.h>
 
@@ -187,6 +188,11 @@ int ScreenGuardApplication::run()
                _T("TightVNC Screen Guard"), MB_OK | MB_ICONERROR);
     return 1;
   }
+
+  // Remember which desktop the windows above were just created on, so
+  // onTimerTick() can notice if the user later moves to a different one
+  // (see m_creationDesktopName).
+  DesktopSelector::getThreadDesktopName(&m_creationDesktopName);
 
   // Initial state.
   m_lastGeneration =
@@ -498,32 +504,42 @@ void ScreenGuardApplication::applySharedState()
 
   bool stateChanged = (generation != m_lastGeneration);
 
+  // Re-assert position and topmost Z-order on every tick, not only when the
+  // shared state changes. "Topmost" only guarantees a window stays above
+  // non-topmost windows; among topmost windows, order still follows normal
+  // Z-order, so a window created after ours (shell/taskbar during a local
+  // logon, a UAC prompt, a toast) can end up on top of an already-topmost
+  // guard window. A logon on an already-active console session does not
+  // change the WTS session id, so ensureScreenGuardInCurrentSession() never
+  // fires for it and generation never changes either -- without this, the
+  // guard process stays alive but can end up invisible, buried behind the
+  // shell, until something else happens to touch the shared state.
+  RECT rc;
+  getVirtualDesktopRect(&rc);
+
+  // Overlay covers the whole desktop.
+  SetWindowPos(m_overlayWindow, HWND_TOPMOST,
+               rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+               SWP_NOACTIVATE);
+
+  // Banner is centered on the desktop.
+  RECT bannerRc;
+  GetWindowRect(m_bannerWindow, &bannerRc);
+  int bannerWidth = bannerRc.right - bannerRc.left;
+  int bannerHeight = bannerRc.bottom - bannerRc.top;
+  int bannerX = rc.left + ((rc.right - rc.left) - bannerWidth) / 2;
+  int bannerY = rc.top + ((rc.bottom - rc.top) - bannerHeight) / 2;
+  SetWindowPos(m_bannerWindow, HWND_TOPMOST,
+               bannerX, bannerY, 0, 0,
+               SWP_NOSIZE | SWP_NOACTIVATE);
+
+  // Black screen window covers the whole desktop. It must be above the
+  // overlay and the banner when visible, so it is always reordered last.
+  SetWindowPos(m_blankWindow, HWND_TOPMOST,
+               rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+               SWP_NOACTIVATE);
+
   if (stateChanged) {
-    RECT rc;
-    getVirtualDesktopRect(&rc);
-
-    // Overlay covers the whole desktop.
-    SetWindowPos(m_overlayWindow, HWND_TOPMOST,
-                 rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
-                 SWP_NOACTIVATE);
-
-    // Banner is centered on the desktop.
-    RECT bannerRc;
-    GetWindowRect(m_bannerWindow, &bannerRc);
-    int bannerWidth = bannerRc.right - bannerRc.left;
-    int bannerHeight = bannerRc.bottom - bannerRc.top;
-    int bannerX = rc.left + ((rc.right - rc.left) - bannerWidth) / 2;
-    int bannerY = rc.top + ((rc.bottom - rc.top) - bannerHeight) / 2;
-    SetWindowPos(m_bannerWindow, HWND_TOPMOST,
-                 bannerX, bannerY, 0, 0,
-                 SWP_NOSIZE | SWP_NOACTIVATE);
-
-    // Black screen window covers the whole desktop. It must be above the
-    // overlay and the banner when visible, so it is always reordered last.
-    SetWindowPos(m_blankWindow, HWND_TOPMOST,
-                 rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
-                 SWP_NOACTIVATE);
-
     m_lastGeneration = generation;
     m_lastClientCount = clientCount;
     m_lastBlankEnabled = blankEnabled;
@@ -578,6 +594,22 @@ void ScreenGuardApplication::onTimerTick()
 
   // In the test mode the guard never exits by itself.
   if (m_testMode) {
+    return;
+  }
+
+  // A local logon, UAC prompt or other secure-desktop transition can leave
+  // this process attached to a desktop that is no longer the one the user
+  // is looking at, without changing the WTS session id and without this
+  // process dying on its own -- the periodic SetWindowPos(HWND_TOPMOST)
+  // calls in applySharedState() cannot help here, since a window is only
+  // ever visible on the desktop it was created on. Detect this the same
+  // way DesktopServerApplication does (see SessionChangesWatcher) and
+  // shut down so the server relaunches a fresh guard on the desktop that
+  // is actually active.
+  StringStorage currentDesktopName;
+  if (DesktopSelector::getCurrentDesktopName(&currentDesktopName) &&
+      !currentDesktopName.isEqualTo(&m_creationDesktopName)) {
+    WindowsApplication::shutdown();
     return;
   }
 

@@ -49,6 +49,7 @@
 // FIXME: Bad dependency on tvncontrol-app.
 #include "tvncontrol-app/TransportFactory.h"
 #include "tvncontrol-app/ControlPipeName.h"
+#include "tvncontrol-app/ControlCommandLine.h"
 
 #include "tvnserver/BuildTime.h"
 
@@ -77,7 +78,12 @@ TvnServer::TvnServer(bool runsInServiceContext,
   m_screenGuardSessionId(0),
   m_screenGuardSharedMemory(0),
   m_screenGuardSharedData(0),
-  m_screenGuardHeartbeatTimer(0)
+  m_screenGuardHeartbeatTimer(0),
+  m_trayIconProcess(0),
+  m_trayIconSessionId(0),
+  m_trayIconLastAttemptSessionId(0),
+  m_trayIconLastAttemptMs(0),
+  m_trayIconWatcherTimer(0)
 {
   m_log.message(_T("%s Build on %s"),
                  ProductNames::SERVER_PRODUCT_NAME,
@@ -144,6 +150,9 @@ TvnServer::TvnServer(bool runsInServiceContext,
       CreateFileMapping(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE,
                         0, sizeof(ScreenGuardSharedData),
                         ScreenGuardSharedNames::SHARED_MEMORY_NAME);
+    // Capture this right away: SetSecurityInfo()/MapViewOfFile() below can
+    // overwrite the last-error value before we get a chance to read it.
+    DWORD screenGuardMemoryCreateError = GetLastError();
     if (m_screenGuardSharedMemory != 0) {
       // Allow all users to open the mapping. This is required when the
       // server runs as a service (session 0) and the screen guard runs
@@ -166,6 +175,14 @@ TvnServer::TvnServer(bool runsInServiceContext,
         CloseHandle(m_screenGuardSharedMemory);
         m_screenGuardSharedMemory = 0;
       }
+    } else if (screenGuardMemoryCreateError == ERROR_ALREADY_EXISTS) {
+      // Another tvnserver.exe instance (normally the running Windows
+      // service) already owns this shared block. This process is just
+      // opening it, e.g. because someone ran tvnserver.exe directly while
+      // the service was already active: it must not reset the state the
+      // real, running screen guard depends on.
+      m_log.info(_T("Screen guard shared memory already existed;")
+                _T(" reusing the existing state"));
     } else {
       memset(m_screenGuardSharedData, 0, sizeof(ScreenGuardSharedData));
       m_screenGuardSharedData->serverHeartbeatMs = GetTickCount();
@@ -174,10 +191,23 @@ TvnServer::TvnServer(bool runsInServiceContext,
   } catch (...) {
     m_log.error(_T("Failed to initialize the screen guard shared memory"));
   }
+
+  // Keep the Control Interface tray icon available to the local user as
+  // soon as they log on, without them having to find and run tvnserver.exe
+  // themselves (which would start a second, independent server instance
+  // instead of talking to this service).
+  if (runsInServiceContext) {
+    startTrayIconWatcher();
+  }
 }
 
 TvnServer::~TvnServer()
 {
+  // Stop watching for session changes before tearing down the rest of the
+  // server; the tray icon process itself is left running, exactly as if
+  // the user had opened it manually.
+  stopTrayIconWatcher();
+
   // Stop the screen guard first so the guard process does not outlive the
   // shared memory block.
   stopScreenGuard();
@@ -586,6 +616,11 @@ void TvnServer::publishScreenGuardState()
     lastClientAddress = info.m_peerAddr;
   }
 
+  m_log.message(_T("Publishing screen guard state: clientCount=%d,")
+               _T(" lastClientAddress=\"%s\", targetSessionId=%u"),
+               (int)clientList.size(), lastClientAddress.getString(),
+               (unsigned int)getScreenGuardTargetSessionId());
+
   // Publish under the generation lock protocol: first write the payload,
   // then advance the generation counter.
   _tcsncpy_s(m_screenGuardSharedData->lastClientAddress,
@@ -864,4 +899,120 @@ void TvnServer::stopScreenGuard()
   delete m_screenGuardProcess;
   m_screenGuardProcess = 0;
   m_screenGuardSessionId = 0;
+}
+
+// ==========================================================================
+// Control Interface tray icon session follower.
+// ==========================================================================
+
+// Minimum time between two launch attempts in the same session. Avoids
+// respawning a process every watcher tick when the user already has their
+// own Control Interface open in that session: our "-slave" instance then
+// exits almost immediately because of its own per-session single-instance
+// check (see ControlApplication::run()), which would otherwise look like a
+// stuck/exited process on every single tick.
+static const ULONG TRAY_ICON_RETRY_INTERVAL_MS = 30000; // 30 s
+
+void TvnServer::startTrayIconWatcher()
+{
+  if (m_trayIconWatcherTimer == 0 &&
+      !CreateTimerQueueTimer(&m_trayIconWatcherTimer, 0,
+                             trayIconWatcherTimer, this,
+                             0, 1000, WT_EXECUTEDEFAULT)) {
+    m_log.warning(_T("Failed to start the tray icon watcher timer"));
+    m_trayIconWatcherTimer = 0;
+  }
+}
+
+void TvnServer::stopTrayIconWatcher()
+{
+  HANDLE watcherTimer = 0;
+  {
+    AutoLock l(&m_trayIconMutex);
+    watcherTimer = m_trayIconWatcherTimer;
+    m_trayIconWatcherTimer = 0;
+  }
+  if (watcherTimer != 0) {
+    // Waits for an in-flight callback to finish; must not be called while
+    // holding m_trayIconMutex (same deadlock concern as the screen guard
+    // heartbeat timer, see stopScreenGuard()).
+    DeleteTimerQueueTimer(0, watcherTimer, INVALID_HANDLE_VALUE);
+  }
+
+  AutoLock l(&m_trayIconMutex);
+  if (m_trayIconProcess != 0) {
+    delete m_trayIconProcess;
+    m_trayIconProcess = 0;
+  }
+  m_trayIconSessionId = 0;
+}
+
+void CALLBACK TvnServer::trayIconWatcherTimer(void *lpParameter,
+                                              BOOLEAN timerOrWaitFired)
+{
+  TvnServer *tvnServer = (TvnServer *)lpParameter;
+  if (tvnServer != 0) {
+    tvnServer->ensureTrayIconInCurrentSession();
+  }
+}
+
+void TvnServer::ensureTrayIconInCurrentSession()
+{
+  AutoLock l(&m_trayIconMutex);
+
+  if (!isRunningAsService()) {
+    // Application mode already shows its own tray icon; nothing to do.
+    return;
+  }
+
+  DWORD currentSessionId = getScreenGuardTargetSessionId();
+
+  if (m_trayIconProcess != 0) {
+    bool sessionChanged = currentSessionId != m_trayIconSessionId;
+    bool processExited = WaitForSingleObject(
+      m_trayIconProcess->getProcessHandle(), 0) == WAIT_OBJECT_0;
+    if (!sessionChanged && !processExited) {
+      // Still running in the right session; nothing to do.
+      return;
+    }
+    if (sessionChanged) {
+      m_log.message(_T("Tray icon session changed from %u to %u;")
+                    _T(" restarting it"),
+                    (unsigned int)m_trayIconSessionId,
+                    (unsigned int)currentSessionId);
+    }
+    delete m_trayIconProcess;
+    m_trayIconProcess = 0;
+    m_trayIconSessionId = 0;
+  }
+
+  if (currentSessionId == m_trayIconLastAttemptSessionId &&
+      (GetTickCount() - m_trayIconLastAttemptMs) < TRAY_ICON_RETRY_INTERVAL_MS) {
+    return;
+  }
+  m_trayIconLastAttemptSessionId = currentSessionId;
+  m_trayIconLastAttemptMs = GetTickCount();
+
+  StringStorage thisModulePath;
+  Environment::getCurrentModulePath(&thisModulePath);
+  thisModulePath.quoteSelf();
+
+  StringStorage keys;
+  keys.format(_T("%s %s"), ControlCommandLine::CONTROL_SERVICE,
+             ControlCommandLine::SLAVE_MODE);
+
+  try {
+    bool connectToRdp = m_srvConfig->getConnectToRdpFlag();
+    Process *process = new CurrentConsoleProcess(&m_log, connectToRdp,
+                                                 thisModulePath.getString(),
+                                                 keys.getString());
+    process->start();
+    m_trayIconProcess = process;
+    m_trayIconSessionId = currentSessionId;
+    m_log.message(_T("Started the Control Interface tray icon in session %u"),
+                 (unsigned int)currentSessionId);
+  } catch (Exception &e) {
+    m_log.error(_T("Failed to start the Control Interface tray icon: %s"),
+               e.getMessage());
+  }
 }

@@ -127,7 +127,13 @@ LRESULT ControlTrayIcon::windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
     break;
   default:
     if (uMsg == WM_USER_TASKBAR) {
-      hide();
+      // The shell (re)created its taskbar -- either Explorer just
+      // restarted, or it was not ready yet when this icon was first added
+      // (e.g. we were launched automatically right at logon, racing
+      // Explorer's own startup) and silently dropped the original
+      // Shell_NotifyIcon(NIM_ADD) call. Re-adding here is the standard,
+      // idempotent way to recover in both cases.
+      show();
     }
     *useDefWindowProc = true;
   }

@@ -224,6 +224,17 @@ protected:
 
   // Command line.
   StringStorage m_cmdLine;
+
+  // Name of the desktop the guard windows were created on (captured right
+  // after creation). Compared against the current input desktop on every
+  // timer tick: a local logon/UAC prompt/secure-desktop transition can
+  // leave this process's windows behind on a desktop nobody is looking at
+  // anymore, even though the WTS session id never changes and the process
+  // stays alive. When that happens the guard shuts itself down so the
+  // server's existing "process exited, relaunch it" path
+  // (TvnServer::ensureScreenGuardInCurrentSession()) starts a fresh one on
+  // whatever desktop is actually active.
+  StringStorage m_creationDesktopName;
 };
 
 #endif // _SCREEN_GUARD_APPLICATION_H_

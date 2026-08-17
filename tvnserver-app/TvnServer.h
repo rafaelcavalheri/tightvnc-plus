@@ -200,6 +200,29 @@ protected:
   static void CALLBACK screenGuardHeartbeatTimer(void *lpParameter,
                                                  BOOLEAN timerOrWaitFired);
 
+  // ---------- Control Interface tray icon session follower ----------
+
+  // Starts the watcher timer that keeps the Control Interface tray icon
+  // running in the active interactive session. Called once from the
+  // constructor when running as a service; unlike the screen guard, this
+  // does not depend on any client being connected, so the local user
+  // always has the tray icon available right after logging on.
+  void startTrayIconWatcher();
+
+  // Stops the watcher timer. Does not kill an already-running tray icon
+  // process: it is left to reconnect or exit on its own, the same as one
+  // opened manually by the user.
+  void stopTrayIconWatcher();
+
+  // Makes sure the tray icon process is running in the current
+  // interactive session, (re)launching it as needed. No-op in application
+  // mode, where the application window already provides its own tray icon.
+  void ensureTrayIconInCurrentSession();
+
+  // Called by the timer queue thread to run ensureTrayIconInCurrentSession().
+  static void CALLBACK trayIconWatcherTimer(void *lpParameter,
+                                            BOOLEAN timerOrWaitFired);
+
   /**
    * Log writer.
    */
@@ -291,6 +314,32 @@ protected:
   // Timer that refreshes the heartbeat in the shared memory block. This
   // is a timer queue timer handle created by CreateTimerQueueTimer().
   HANDLE m_screenGuardHeartbeatTimer;
+
+  // ---------- Control Interface tray icon members ----------
+
+  // Process object of the running tray icon (Control Interface, "-slave"
+  // mode) helper. Zero when not running.
+  Process *m_trayIconProcess;
+
+  // Session id where the current tray icon process was started.
+  DWORD m_trayIconSessionId;
+
+  // Session id and tick count (GetTickCount()) of the last launch attempt,
+  // successful or not. Used to avoid respawning every watcher tick in a
+  // session where the user already has their own Control Interface open
+  // (our "-slave" instance exits right away in that case, see
+  // ControlApplication::run()).
+  DWORD m_trayIconLastAttemptSessionId;
+  ULONG m_trayIconLastAttemptMs;
+
+  // Protects m_trayIconProcess, m_trayIconSessionId and the last-attempt
+  // fields above, all mutated from the watcher timer thread.
+  LocalMutex m_trayIconMutex;
+
+  // Timer that runs ensureTrayIconInCurrentSession(). Created at server
+  // startup when running as a service; independent of the screen guard
+  // heartbeat timer, which only runs while the guard is active.
+  HANDLE m_trayIconWatcherTimer;
 };
 
 #endif

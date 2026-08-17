@@ -53,8 +53,13 @@ void NotifyIcon::show()
   m_nid.uFlags = NIF_MESSAGE;
   m_nid.hWnd = m_window;
   m_nid.uCallbackMessage = WM_USER + 1;
-  Shell_NotifyIcon(NIM_ADD, &m_nid);
-  m_visible = true;
+  // Reflect whether the shell actually accepted the icon. If this is set
+  // unconditionally, a transient failure on the first attempt (e.g. the
+  // shell not being fully ready right after this process was auto-started)
+  // leaves isVisible() permanently wrong, and callers that only retry
+  // show() while !isVisible() (see ControlApplication::execute()'s 500 ms
+  // self-healing loop) never try again.
+  m_visible = Shell_NotifyIcon(NIM_ADD, &m_nid) != FALSE;
 }
 
 void NotifyIcon::hide()
